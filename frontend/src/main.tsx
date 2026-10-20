@@ -1,13 +1,16 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
 import App from "./App";
+import { BrowserRouter } from 'react-router-dom';
 import "./styles.css";
+import AuthGate from "./components/AuthGate";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <App />
+      <AuthGate>
+        <App />
+      </AuthGate>
     </BrowserRouter>
   </React.StrictMode>,
 );

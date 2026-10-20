@@ -5,20 +5,11 @@ import {
   Plus, Search, Settings2, Sparkles, Trash2, Users, Wallet,
 } from "lucide-react";
 import { Link, NavLink, Route, Routes, useNavigate, useParams } from "react-router-dom";
-import { buildDemoItinerary, seedTrips } from "./data";
+import { buildDemoItinerary } from "./data";
+import { tripsApi } from "./services/tripsApi";
 import type { Interest, Trip } from "./types";
 
-const STORAGE_KEY = "wayfarer.trips.v1";
 const INTERESTS: Interest[] = ["Culture", "Food", "Nature", "Adventure", "Shopping", "Relaxation", "History", "Photography"];
-
-function readTrips(): Trip[] {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? JSON.parse(saved) as Trip[] : seedTrips;
-  } catch {
-    return seedTrips;
-  }
-}
 
 function formatDate(date: string) {
   if (!date) return "Date not set";
@@ -33,15 +24,82 @@ function money(value: number, currency = "USD") {
 }
 
 export default function App() {
-  const [trips, setTrips] = useState<Trip[]>(readTrips);
+  const [trips, setTrips] = useState<Trip[]>([]);
   const [search, setSearch] = useState("");
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [apiError, setApiError] = useState("");
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(trips)); }, [trips]);
+  async function loadTrips() {
+    setLoading(true);
+    setApiError("");
+    try {
+      const result = await tripsApi.list();
+      setTrips(result);
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : "Could not load trips.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
-  const addTrip = (trip: Trip) => setTrips((current) => [trip, ...current]);
-  const updateTrip = (updatedTrip: Trip) => setTrips((current) => current.map((trip) => trip.id === updatedTrip.id ? updatedTrip : trip));
-  const deleteTrip = (id: string) => setTrips((current) => current.filter((trip) => trip.id !== id));
+  useEffect(() => { void loadTrips(); }, []);
+
+  const addTrip = async (trip: Trip): Promise<Trip> => {
+    setApiError("");
+    try {
+      const created = await tripsApi.create({
+        destination: trip.destination,
+        startDate: trip.startDate,
+        endDate: trip.endDate,
+        budget: trip.budget,
+        currency: trip.currency,
+        travelers: trip.travelers,
+        pace: trip.pace,
+        interests: trip.interests,
+        accommodation: trip.accommodation,
+      });
+      setTrips((current) => [created, ...current]);
+      return created;
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : "Could not create trip.");
+      throw error;
+    }
+  };
+
+  const updateTrip = async (updatedTrip: Trip): Promise<Trip> => {
+    setApiError("");
+    try {
+      const saved = await tripsApi.update(updatedTrip.id, {
+        destination: updatedTrip.destination,
+        startDate: updatedTrip.startDate,
+        endDate: updatedTrip.endDate,
+        budget: updatedTrip.budget,
+        currency: updatedTrip.currency,
+        travelers: updatedTrip.travelers,
+        pace: updatedTrip.pace,
+        interests: updatedTrip.interests,
+        accommodation: updatedTrip.accommodation,
+        itinerary: updatedTrip.itinerary,
+      });
+      setTrips((current) => current.map((trip) => trip.id === saved.id ? saved : trip));
+      return saved;
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : "Could not update trip.");
+      throw error;
+    }
+  };
+
+  const deleteTrip = async (id: string): Promise<void> => {
+    setApiError("");
+    try {
+      await tripsApi.remove(id);
+      setTrips((current) => current.filter((trip) => trip.id !== id));
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : "Could not delete trip.");
+      throw error;
+    }
+  };
   const filteredTrips = useMemo(
     () => trips.filter((trip) => trip.destination.toLowerCase().includes(search.toLowerCase())),
     [trips, search],
@@ -85,18 +143,21 @@ export default function App() {
           <button className="icon-button mobile-menu-button" aria-label="Open menu" onClick={() => setMobileMenu(!mobileMenu)}><Menu size={20} /></button>
           <div className="breadcrumb">Workspace <span>/</span> <strong>My travels</strong></div>
           <div className="topbar-right">
-            <span className="status-dot" /> <span className="saved-label">Your plans are saved locally</span>
+            <span className="status-dot" /> <span className="saved-label">{loading ? "Connecting to trip database…" : "Trips synced with backend"}</span>
             <div className="top-avatar">W</div>
           </div>
         </header>
         <div className="page-content">
-          <Routes>
+          {apiError && <div className="form-error" role="alert" style={{ marginBottom: 16 }}>
+            <strong>Backend request failed:</strong> {apiError} <button type="button" className="outline-button" onClick={() => void loadTrips()}>Retry connection</button>
+          </div>}
+          {loading ? <div className="empty-state"><div className="empty-icon"><Compass size={28} /></div><h3>Loading your journeys…</h3><p>Connecting to your trip database.</p></div> : <Routes>
             <Route path="/" element={<Dashboard trips={filteredTrips} totalTrips={trips.length} search={search} setSearch={setSearch} onDelete={deleteTrip} />} />
             <Route path="/create" element={<CreateTrip onCreate={addTrip} />} />
             <Route path="/trips/:tripId/edit" element={<EditTrip trips={trips} onUpdate={updateTrip} />} />
             <Route path="/trips/:tripId" element={<TripDetail trips={trips} onDelete={deleteTrip} />} />
             <Route path="*" element={<NotFound />} />
-          </Routes>
+          </Routes>}
         </div>
         <footer className="footer"><span>© 2026 Wayfarer Studio</span><span>Made for the journey <span className="footer-heart">♥</span></span></footer>
       </main>
@@ -177,7 +238,7 @@ function TripCard({ trip, index, onDelete }: { trip: Trip; index: number; onDele
         <div className="trip-card-title-row"><Link to={`/trips/${trip.id}`} className="trip-card-title">{trip.destination}</Link><button className="tiny-icon-button" title="Delete trip" onClick={() => setConfirmDelete(true)}><Trash2 size={15} /></button></div>
         <div className="trip-card-date"><CalendarDays size={14} /> {formatDate(trip.startDate)} <span>—</span> {formatDate(trip.endDate)}</div>
         <div className="trip-card-bottom"><div className="trip-tags">{trip.interests.slice(0, 2).map((interest) => <span key={interest}>{interest}</span>)}</div><span className="trip-budget"><CreditCard size={14} /> {money(trip.budget, trip.currency)}</span></div>
-        {confirmDelete && <div className="confirm-delete"><span>Delete this trip?</span><button onClick={() => onDelete(trip.id)}>Yes</button><button onClick={() => setConfirmDelete(false)}>Cancel</button></div>}
+        {confirmDelete && <div className="confirm-delete"><span>Delete this trip?</span><button onClick={() => { void onDelete(trip.id).catch(() => undefined); }}>Yes</button><button onClick={() => setConfirmDelete(false)}>Cancel</button></div>}
       </div>
     </article>
   );
@@ -187,7 +248,7 @@ function EmptyState() {
   return <div className="empty-state"><div className="empty-icon"><Compass size={28} /></div><h3>Your next adventure starts here.</h3><p>No trips match your search. Try another destination or plan a new journey.</p><Link className="primary-button" to="/create"><Plus size={16} /> Create your first trip</Link></div>;
 }
 
-function CreateTrip({ onCreate, initialTrip, onUpdate }: { onCreate: (trip: Trip) => void; initialTrip?: Trip; onUpdate?: (trip: Trip) => void }) {
+function CreateTrip({ onCreate, initialTrip, onUpdate }: { onCreate: (trip: Trip) => Promise<Trip>; initialTrip?: Trip; onUpdate?: (trip: Trip) => Promise<Trip> }) {
   const navigate = useNavigate();
   const [destination, setDestination] = useState(() => initialTrip?.destination ?? "");
   const [startDate, setStartDate] = useState(() => initialTrip?.startDate ?? "");
@@ -204,7 +265,7 @@ function CreateTrip({ onCreate, initialTrip, onUpdate }: { onCreate: (trip: Trip
     current.includes(interest) ? current.filter((item) => item !== interest) : [...current, interest],
   );
 
-  function submit(event: React.FormEvent<HTMLFormElement>) {
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!destination.trim()) { setError("Please enter a destination."); return; }
     if (!startDate || !endDate) { setError("Please choose your travel dates."); return; }
@@ -226,9 +287,13 @@ function CreateTrip({ onCreate, initialTrip, onUpdate }: { onCreate: (trip: Trip
       createdAt: initialTrip?.createdAt ?? new Date().toISOString(),
       itinerary: buildDemoItinerary(destination.trim(), startDate, days, interests),
     };
-    if (initialTrip && onUpdate) onUpdate(trip);
-    else onCreate(trip);
-    navigate(`/trips/${trip.id}`);
+    setError("");
+    try {
+      const savedTrip = initialTrip && onUpdate ? await onUpdate(trip) : await onCreate(trip);
+      navigate(`/trips/${savedTrip.id}`);
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Unable to save this trip. Check the backend connection and try again.");
+    }
   }
 
   return (
@@ -256,20 +321,20 @@ function CreateTrip({ onCreate, initialTrip, onUpdate }: { onCreate: (trip: Trip
         <div className="form-section-title"><span className="form-step">03</span><div><h2>What moves you?</h2><p>Choose all the things you love to experience.</p></div></div>
         <div className="interest-grid">{INTERESTS.map((interest) => <button type="button" key={interest} onClick={() => toggleInterest(interest)} className={`interest-chip ${interests.includes(interest) ? "interest-selected" : ""}`}>{interests.includes(interest) ? <Check size={14} /> : <Plus size={14} />}{interest}</button>)}</div>
         {error && <div className="form-error" role="alert">{error}</div>}
-        <div className="form-submit-row"><span><Sparkles size={15} /> Your draft will be saved in this browser.</span><button type="submit" className="primary-button"><Sparkles size={16} /> {initialTrip ? "Save trip changes" : "Create my itinerary"} <ArrowRight size={16} /></button></div>
+        <div className="form-submit-row"><span><Sparkles size={15} /> Your trip will be saved to the backend database.</span><button type="submit" className="primary-button"><Sparkles size={16} /> {initialTrip ? "Save trip changes" : "Create my itinerary"} <ArrowRight size={16} /></button></div>
       </form>
     </div>
   );
 }
 
-function EditTrip({ trips, onUpdate }: { trips: Trip[]; onUpdate: (trip: Trip) => void }) {
+function EditTrip({ trips, onUpdate }: { trips: Trip[]; onUpdate: (trip: Trip) => Promise<Trip> }) {
   const { tripId } = useParams();
   const trip = trips.find((item) => item.id === tripId);
   if (!trip) return <div className="not-found"><Compass size={30} /><h2>We couldn't find that trip.</h2><Link to="/" className="primary-button">Back to overview</Link></div>;
   return <CreateTrip initialTrip={trip} onCreate={() => undefined} onUpdate={onUpdate} />;
 }
 
-function TripDetail({ trips, onDelete }: { trips: Trip[]; onDelete: (id: string) => void }) {
+function TripDetail({ trips, onDelete }: { trips: Trip[]; onDelete: (id: string) => Promise<void> }) {
   const { tripId } = useParams();
   const navigate = useNavigate();
   const trip = trips.find((item) => item.id === tripId);
@@ -286,7 +351,7 @@ function TripDetail({ trips, onDelete }: { trips: Trip[]; onDelete: (id: string)
         <div className="detail-hero-copy"><div className="hero-pill"><MapPin size={13} /> YOUR ITINERARY</div><h1>{trip.destination}</h1><p><CalendarDays size={16} /> {formatDate(trip.startDate)} — {formatDate(trip.endDate)} <span className="detail-dot">·</span> {tripDays(trip)} days <span className="detail-dot">·</span> {trip.travelers} travelers</p><div className="detail-tags">{trip.interests.map((interest) => <span key={interest}>{interest}</span>)}</div></div>
         <div className="detail-hero-art"><div className="sun" /><div className="mountain mountain-back" /><div className="mountain mountain-front" /><div className="river" /></div>
       </section>
-      <div className="demo-notice"><Sparkles size={16} /><span><strong>Planning preview</strong> — this is a sample itinerary generated locally. Place details, opening hours, and costs are illustrative; verify before traveling.</span></div>
+      <div className="demo-notice"><Sparkles size={16} /><span><strong>Planning preview</strong> — This is a starter itinerary generated by the backend. Place details, opening hours, and costs are illustrative; verify before traveling.</span></div>
       <div className="detail-layout">
         <section className="itinerary-panel">
           <div className="section-heading detail-heading"><div><div className="eyebrow">YOUR DAY-BY-DAY PLAN</div><h2>The journey <span>unfolds</span></h2></div><span className="draft-pill"><span /> DRAFT</span></div>
@@ -307,7 +372,7 @@ function TripDetail({ trips, onDelete }: { trips: Trip[]; onDelete: (id: string)
           <Link className="outline-button full-width" to={`/trips/${trip.id}/edit`}>Edit trip details <ArrowRight size={15} /></Link>
           <button className="outline-button full-width" onClick={() => window.print()}>Print itinerary <ArrowRight size={15} /></button>
           <button className="text-danger-button" onClick={() => setShowDelete(true)}><Trash2 size={14} /> Delete this trip</button>
-          {showDelete && <div className="confirm-delete summary-confirm"><span>Delete this trip permanently?</span><button onClick={() => { onDelete(trip.id); navigate("/"); }}>Delete</button><button onClick={() => setShowDelete(false)}>Keep</button></div>}
+          {showDelete && <div className="confirm-delete summary-confirm"><span>Delete this trip permanently?</span><button onClick={() => { void onDelete(trip.id).then(() => navigate("/")).catch(() => undefined); }}>Delete</button><button onClick={() => setShowDelete(false)}>Keep</button></div>}
         </aside>
       </div>
     </div>
