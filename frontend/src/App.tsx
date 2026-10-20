@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ArrowDownRight, ArrowLeft, ArrowRight, CalendarDays, Check, ChevronDown,
   Compass, CreditCard, Globe2, Heart, LayoutDashboard, MapPin, Menu,
@@ -40,6 +40,7 @@ export default function App() {
   useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(trips)); }, [trips]);
 
   const addTrip = (trip: Trip) => setTrips((current) => [trip, ...current]);
+  const updateTrip = (updatedTrip: Trip) => setTrips((current) => current.map((trip) => trip.id === updatedTrip.id ? updatedTrip : trip));
   const deleteTrip = (id: string) => setTrips((current) => current.filter((trip) => trip.id !== id));
   const filteredTrips = useMemo(
     () => trips.filter((trip) => trip.destination.toLowerCase().includes(search.toLowerCase())),
@@ -92,6 +93,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Dashboard trips={filteredTrips} totalTrips={trips.length} search={search} setSearch={setSearch} onDelete={deleteTrip} />} />
             <Route path="/create" element={<CreateTrip onCreate={addTrip} />} />
+            <Route path="/trips/:tripId/edit" element={<EditTrip trips={trips} onUpdate={updateTrip} />} />
             <Route path="/trips/:tripId" element={<TripDetail trips={trips} onDelete={deleteTrip} />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
@@ -185,17 +187,17 @@ function EmptyState() {
   return <div className="empty-state"><div className="empty-icon"><Compass size={28} /></div><h3>Your next adventure starts here.</h3><p>No trips match your search. Try another destination or plan a new journey.</p><Link className="primary-button" to="/create"><Plus size={16} /> Create your first trip</Link></div>;
 }
 
-function CreateTrip({ onCreate }: { onCreate: (trip: Trip) => void }) {
+function CreateTrip({ onCreate, initialTrip, onUpdate }: { onCreate: (trip: Trip) => void; initialTrip?: Trip; onUpdate?: (trip: Trip) => void }) {
   const navigate = useNavigate();
-  const [destination, setDestination] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [budget, setBudget] = useState("1500");
-  const [currency, setCurrency] = useState("USD");
-  const [travelers, setTravelers] = useState("2");
-  const [pace, setPace] = useState<Trip["pace"]>("Balanced");
-  const [accommodation, setAccommodation] = useState("Boutique hotel");
-  const [interests, setInterests] = useState<Interest[]>(["Culture", "Food"]);
+  const [destination, setDestination] = useState(() => initialTrip?.destination ?? "");
+  const [startDate, setStartDate] = useState(() => initialTrip?.startDate ?? "");
+  const [endDate, setEndDate] = useState(() => initialTrip?.endDate ?? "");
+  const [budget, setBudget] = useState(() => String(initialTrip?.budget ?? 1500));
+  const [currency, setCurrency] = useState(() => initialTrip?.currency ?? "USD");
+  const [travelers, setTravelers] = useState(() => String(initialTrip?.travelers ?? 2));
+  const [pace, setPace] = useState<Trip["pace"]>(() => initialTrip?.pace ?? "Balanced");
+  const [accommodation, setAccommodation] = useState(() => initialTrip?.accommodation ?? "Boutique hotel");
+  const [interests, setInterests] = useState<Interest[]>(() => initialTrip?.interests ?? ["Culture", "Food"]);
   const [error, setError] = useState("");
 
   const toggleInterest = (interest: Interest) => setInterests((current) =>
@@ -211,7 +213,7 @@ function CreateTrip({ onCreate }: { onCreate: (trip: Trip) => void }) {
     const days = Math.floor((new Date(`${endDate}T12:00:00`).getTime() - new Date(`${startDate}T12:00:00`).getTime()) / 86400000) + 1;
     if (days > 14) { setError("For this first version, trips can be up to 14 days."); return; }
     const trip: Trip = {
-      id: crypto.randomUUID(),
+      id: initialTrip?.id ?? crypto.randomUUID(),
       destination: destination.trim(),
       startDate,
       endDate,
@@ -221,23 +223,24 @@ function CreateTrip({ onCreate }: { onCreate: (trip: Trip) => void }) {
       pace,
       interests,
       accommodation,
-      createdAt: new Date().toISOString(),
-      itinerary: buildDemoItinerary(destination, startDate, days, interests),
+      createdAt: initialTrip?.createdAt ?? new Date().toISOString(),
+      itinerary: buildDemoItinerary(destination.trim(), startDate, days, interests),
     };
-    onCreate(trip);
+    if (initialTrip && onUpdate) onUpdate(trip);
+    else onCreate(trip);
     navigate(`/trips/${trip.id}`);
   }
 
   return (
     <div className="create-page">
-      <Link to="/" className="back-link"><ArrowLeft size={16} /> Back to overview</Link>
-      <div className="create-intro"><div className="eyebrow"><span className="eyebrow-line" /> YOUR NEXT ADVENTURE</div><h1>Let's plan something <em>remarkable.</em></h1><p>Tell us what your ideal trip looks like. We'll shape a day-by-day draft you can make your own.</p></div>
+      <Link to={initialTrip ? `/trips/${initialTrip.id}` : "/"} className="back-link"><ArrowLeft size={16} /> {initialTrip ? "Back to itinerary" : "Back to overview"}</Link>
+      <div className="create-intro"><div className="eyebrow"><span className="eyebrow-line" /> {initialTrip ? "REFINE YOUR JOURNEY" : "YOUR NEXT ADVENTURE"}</div><h1>{initialTrip ? <>Make this trip <em>your own.</em></> : <>Let's plan something <em>remarkable.</em></>}</h1><p>{initialTrip ? "Update your preferences. Your day-by-day draft will be refreshed to match." : "Tell us what your ideal trip looks like. We'll shape a day-by-day draft you can make your own."}</p></div>
       <form className="trip-form" onSubmit={submit}>
         <div className="form-section-title"><span className="form-step">01</span><div><h2>The essentials</h2><p>Start with where and when.</p></div></div>
         <div className="form-grid">
           <label className="field field-full"><span>Destination <b>*</b></span><div className="input-with-icon"><MapPin size={17} /><input value={destination} onChange={(e) => setDestination(e.target.value)} placeholder="e.g. Kyoto, Japan" required /></div></label>
-          <label className="field"><span>Departure date <b>*</b></span><input type="date" value={startDate} min={new Date().toISOString().slice(0, 10)} onChange={(e) => { setStartDate(e.target.value); if (endDate && e.target.value > endDate) setEndDate(e.target.value); }} required /></label>
-          <label className="field"><span>Return date <b>*</b></span><input type="date" value={endDate} min={startDate || new Date().toISOString().slice(0, 10)} onChange={(e) => setEndDate(e.target.value)} required /></label>
+          <label className="field"><span>Departure date <b>*</b></span><input type="date" value={startDate} min={initialTrip ? undefined : new Date().toISOString().slice(0, 10)} onChange={(e) => { setStartDate(e.target.value); if (endDate && e.target.value > endDate) setEndDate(e.target.value); }} required /></label>
+          <label className="field"><span>Return date <b>*</b></span><input type="date" value={endDate} min={startDate || (initialTrip ? undefined : new Date().toISOString().slice(0, 10))} onChange={(e) => setEndDate(e.target.value)} required /></label>
         </div>
 
         <div className="form-divider" />
@@ -253,10 +256,17 @@ function CreateTrip({ onCreate }: { onCreate: (trip: Trip) => void }) {
         <div className="form-section-title"><span className="form-step">03</span><div><h2>What moves you?</h2><p>Choose all the things you love to experience.</p></div></div>
         <div className="interest-grid">{INTERESTS.map((interest) => <button type="button" key={interest} onClick={() => toggleInterest(interest)} className={`interest-chip ${interests.includes(interest) ? "interest-selected" : ""}`}>{interests.includes(interest) ? <Check size={14} /> : <Plus size={14} />}{interest}</button>)}</div>
         {error && <div className="form-error" role="alert">{error}</div>}
-        <div className="form-submit-row"><span><Sparkles size={15} /> Your draft will be saved in this browser.</span><button type="submit" className="primary-button"><Sparkles size={16} /> Create my itinerary <ArrowRight size={16} /></button></div>
+        <div className="form-submit-row"><span><Sparkles size={15} /> Your draft will be saved in this browser.</span><button type="submit" className="primary-button"><Sparkles size={16} /> {initialTrip ? "Save trip changes" : "Create my itinerary"} <ArrowRight size={16} /></button></div>
       </form>
     </div>
   );
+}
+
+function EditTrip({ trips, onUpdate }: { trips: Trip[]; onUpdate: (trip: Trip) => void }) {
+  const { tripId } = useParams();
+  const trip = trips.find((item) => item.id === tripId);
+  if (!trip) return <div className="not-found"><Compass size={30} /><h2>We couldn't find that trip.</h2><Link to="/" className="primary-button">Back to overview</Link></div>;
+  return <CreateTrip initialTrip={trip} onCreate={() => undefined} onUpdate={onUpdate} />;
 }
 
 function TripDetail({ trips, onDelete }: { trips: Trip[]; onDelete: (id: string) => void }) {
@@ -294,6 +304,7 @@ function TripDetail({ trips, onDelete }: { trips: Trip[]; onDelete: (id: string)
           <SummaryRow icon={<Compass size={16} />} label="Travel pace" value={trip.pace} />
           <SummaryRow icon={<Globe2 size={16} />} label="Stay preference" value={trip.accommodation} />
           <div className="summary-divider" />
+          <Link className="outline-button full-width" to={`/trips/${trip.id}/edit`}>Edit trip details <ArrowRight size={15} /></Link>
           <button className="outline-button full-width" onClick={() => window.print()}>Print itinerary <ArrowRight size={15} /></button>
           <button className="text-danger-button" onClick={() => setShowDelete(true)}><Trash2 size={14} /> Delete this trip</button>
           {showDelete && <div className="confirm-delete summary-confirm"><span>Delete this trip permanently?</span><button onClick={() => { onDelete(trip.id); navigate("/"); }}>Delete</button><button onClick={() => setShowDelete(false)}>Keep</button></div>}
