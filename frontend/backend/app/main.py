@@ -5,7 +5,6 @@ from fastapi import Depends, FastAPI, HTTPException, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from openai import OpenAIError
 from .ai_itinerary import generate_ai_itinerary
 from .config import FRONTEND_ORIGINS
 from .database import Base, engine, get_db
@@ -14,7 +13,9 @@ from .itinerary import build_itinerary
 from .schemas import (
     HealthResponse, ItineraryDay, RegenerateDayRequest, TripCreate, TripResponse, TripUpdate,
 )
+import logging
 
+logger = logging.getLogger(__name__)
 Base.metadata.create_all(bind=engine)
 app = FastAPI(title="Personalized Travel Planner API", version="1.0.0")
 app.add_middleware(
@@ -91,18 +92,23 @@ def list_trips(
     response_model=TripResponse,
     status_code=status.HTTP_201_CREATED,
 )
-def create_trip(
+
+
+
+
+async def create_trip(
     payload: TripCreate,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     data = payload.model_dump()
     try:
-        generated_days = generate_ai_itinerary(payload)
-    except (OpenAIError, ValueError, RuntimeError) as exc:
+        generated_days = await generate_ai_itinerary(payload)
+    except Exception as exc:
+        logger.exception("AI itinerary generation failed")
         raise HTTPException(
             status_code=502,
-            detail="Could not generate the itinerary. Please try again.",
+            detail="AI itinerary generation failed. Check the backend terminal for details.",
         ) from exc
 
     itinerary = [
@@ -163,7 +169,7 @@ def delete_trip(trip_id: str, db: Session = Depends(get_db), current_user: dict 
 
 
 @app.post("/api/v1/trips/{trip_id}/regenerate-day", response_model=TripResponse)
-def regenerate_day(trip_id: str, payload: RegenerateDayRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
+async def regenerate_day(trip_id: str, payload: RegenerateDayRequest, db: Session = Depends(get_db), current_user: dict = Depends(get_current_user)):
     trip = get_trip_or_404(trip_id, db, current_user["id"])
     if payload.day_number > (trip.end_date - trip.start_date).days + 1:
         raise HTTPException(status_code=422, detail="Day number is outside this trip's date range")
@@ -179,8 +185,8 @@ def regenerate_day(trip_id: str, payload: RegenerateDayRequest, db: Session = De
         accommodation=trip.accommodation,
     )
     try:
-        fresh_day = generate_ai_itinerary(trip_fields)[payload.day_number - 1]
-    except (OpenAIError, ValueError, RuntimeError) as exc:
+        fresh_day = await generate_ai_itinerary(trip_fields)[payload.day_number - 1]
+    except Exception as exc:
         raise HTTPException(
             status_code=502,
             detail="Could not regenerate this day. Please try again.",

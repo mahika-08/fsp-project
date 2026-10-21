@@ -238,7 +238,7 @@ function TripCard({ trip, index, onDelete }: { trip: Trip; index: number; onDele
         <div className="trip-card-title-row"><Link to={`/trips/${trip.id}`} className="trip-card-title">{trip.destination}</Link><button className="tiny-icon-button" title="Delete trip" onClick={() => setConfirmDelete(true)}><Trash2 size={15} /></button></div>
         <div className="trip-card-date"><CalendarDays size={14} /> {formatDate(trip.startDate)} <span>—</span> {formatDate(trip.endDate)}</div>
         <div className="trip-card-bottom"><div className="trip-tags">{trip.interests.slice(0, 2).map((interest) => <span key={interest}>{interest}</span>)}</div><span className="trip-budget"><CreditCard size={14} /> {money(trip.budget, trip.currency)}</span></div>
-        {confirmDelete && <div className="confirm-delete"><span>Delete this trip?</span><button onClick={() => { void onDelete(trip.id).catch(() => undefined); }}>Yes</button><button onClick={() => setConfirmDelete(false)}>Cancel</button></div>}
+        {confirmDelete && <div className="confirm-delete"><span>Delete this trip?</span><button onClick={() => onDelete(trip.id)}>Yes</button><button onClick={() => setConfirmDelete(false)}>Cancel</button></div>}
       </div>
     </article>
   );
@@ -331,7 +331,13 @@ function EditTrip({ trips, onUpdate }: { trips: Trip[]; onUpdate: (trip: Trip) =
   const { tripId } = useParams();
   const trip = trips.find((item) => item.id === tripId);
   if (!trip) return <div className="not-found"><Compass size={30} /><h2>We couldn't find that trip.</h2><Link to="/" className="primary-button">Back to overview</Link></div>;
-  return <CreateTrip initialTrip={trip} onCreate={() => undefined} onUpdate={onUpdate} />;
+  return (
+  <CreateTrip
+    initialTrip={trip}
+    onCreate={async (createdTrip) => createdTrip}
+    onUpdate={onUpdate}
+  />
+);
 }
 
 function TripDetail({ trips, onDelete }: { trips: Trip[]; onDelete: (id: string) => Promise<void> }) {
