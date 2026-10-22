@@ -8,6 +8,7 @@ import { Link, NavLink, Route, Routes, useNavigate, useParams } from "react-rout
 import { buildDemoItinerary } from "./data";
 import { tripsApi } from "./services/tripsApi";
 import type { Interest, Trip } from "./types";
+import { supabase } from "./services/supabase";
 
 const INTERESTS: Interest[] = ["Culture", "Food", "Nature", "Adventure", "Shopping", "Relaxation", "History", "Photography"];
 
@@ -29,7 +30,32 @@ export default function App() {
   const [mobileMenu, setMobileMenu] = useState(false);
   const [loading, setLoading] = useState(true);
   const [apiError, setApiError] = useState("");
+  const [username, setUsername] = useState("Wanderer");
 
+useEffect(() => {
+  let active = true;
+
+  supabase.auth.getUser().then(({ data, error }) => {
+    if (active && !error) {
+      setUsername(
+        String(data.user?.user_metadata?.username ?? "Wanderer")
+      );
+    }
+  });
+
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((_event, session) => {
+    setUsername(
+      String(session?.user.user_metadata?.username ?? "Wanderer")
+    );
+  });
+
+  return () => {
+    active = false;
+    subscription.unsubscribe();
+  };
+}, []);
   async function loadTrips() {
     setLoading(true);
     setApiError("");
@@ -116,6 +142,7 @@ export default function App() {
         <nav className="side-nav">
           <NavLink to="/" end onClick={() => setMobileMenu(false)}><LayoutDashboard size={18} /> Overview</NavLink>
           <NavLink to="/create" onClick={() => setMobileMenu(false)}><Plus size={18} /> Plan a trip <span className="nav-plus">+</span></NavLink>
+          <NavLink to="/settings" onClick={() => setMobileMenu(false)}><Settings2 size={18} />Profile & Settings </NavLink>
         </nav>
         <div className="side-label side-label-spaced">YOUR SPACE</div>
         <nav className="side-nav">
@@ -129,11 +156,18 @@ export default function App() {
             <p>The best journeys leave room for the unexpected.</p>
             <Link to="/create">Plan something new <ArrowRight size={14} /></Link>
           </div>
-          <div className="profile-row">
-            <div className="avatar">W</div>
-            <div className="profile-copy"><strong>Wanderer</strong><span>Personal planner</span></div>
-            <Settings2 size={17} className="muted-icon" />
-          </div>
+          <Link to="/settings" className="profile-row">
+  <div className="avatar">
+    {username.charAt(0).toUpperCase()}
+  </div>
+
+  <div className="profile-copy">
+    <strong>{username}</strong>
+    <span>Personal planner</span>
+  </div>
+
+  <Settings2 size={17} className="muted-icon" />
+</Link>
         </div>
       </aside>
 
@@ -144,7 +178,9 @@ export default function App() {
           <div className="breadcrumb">Workspace <span>/</span> <strong>My travels</strong></div>
           <div className="topbar-right">
             <span className="status-dot" /> <span className="saved-label">{loading ? "Connecting to trip database…" : "Trips synced with backend"}</span>
-            <div className="top-avatar">W</div>
+            <Link to="/settings" className="top-avatar" title="Profile settings">
+  {username.charAt(0).toUpperCase()}
+</Link>
           </div>
         </header>
         <div className="page-content">
@@ -156,6 +192,7 @@ export default function App() {
             <Route path="/create" element={<CreateTrip onCreate={addTrip} />} />
             <Route path="/trips/:tripId/edit" element={<EditTrip trips={trips} onUpdate={updateTrip} />} />
             <Route path="/trips/:tripId" element={<TripDetail trips={trips} onDelete={deleteTrip} />} />
+            <Route path="/settings" element={<ProfileSettings username={username} onUsernameChange={setUsername}/>} />
             <Route path="*" element={<NotFound />} />
           </Routes>}
         </div>
@@ -392,3 +429,183 @@ function SummaryRow({ icon, label, value }: { icon: React.ReactNode; label: stri
 function NotFound() {
   return <div className="not-found"><Compass size={30} /><h2>This path hasn't been mapped yet.</h2><p>Let's get you back to your travels.</p><Link to="/" className="primary-button">Back to overview <ArrowRight size={16} /></Link></div>;
 }
+
+
+function ProfileSettings({
+  username,
+  onUsernameChange,
+}: {
+  username: string;
+  onUsernameChange: (value: string) => void;
+}) {
+  const [value, setValue] = useState(username === "Wanderer" ? "" : username);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    setValue(username === "Wanderer" ? "" : username);
+  }, [username]);
+
+  const suggestions = [
+    "WanderSoul",
+    "RoamingStar",
+    "TravelMuse",
+    "HappyExplorer",
+    "DreamyNomad",
+    "HiddenGemHunter",
+  ];
+
+  async function saveUsername(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const cleaned = value.trim();
+
+    if (!/^[a-zA-Z0-9_]{3,20}$/.test(cleaned)) {
+      setMessage(
+        "Use 3–20 characters: letters, numbers, or underscores."
+      );
+      setSaved(false);
+      return;
+    }
+
+    setBusy(true);
+    setMessage("");
+    setSaved(false);
+
+    try {
+      const { data, error } = await supabase.auth.updateUser({
+        data: { username: cleaned },
+      });
+
+      if (error) throw error;
+
+      const updatedUsername = String(
+        data.user.user_metadata?.username ?? cleaned
+      );
+
+      onUsernameChange(updatedUsername);
+      setValue(updatedUsername);
+      setMessage("Your username has been saved.");
+      setSaved(true);
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not save your username. Please try again."
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="create-page">
+      <Link to="/" className="back-link">
+        <ArrowLeft size={16} /> Back to overview
+      </Link>
+
+      <div className="create-intro">
+        <div className="eyebrow">
+          <span className="eyebrow-line" />
+          YOUR ACCOUNT
+        </div>
+        <h1>Make it <em>personal.</em></h1>
+        <p>
+          Choose a username that feels like you. It will appear
+          on your Wayfarer dashboard.
+        </p>
+      </div>
+
+      <form
+        className="trip-form"
+        onSubmit={saveUsername}
+        style={{ maxWidth: 680 }}
+      >
+        <div className="form-section-title">
+          <span className="form-step">01</span>
+          <div>
+            <h2>Your profile</h2>
+            <p>Your username is saved to your Supabase account.</p>
+          </div>
+        </div>
+
+        <label className="field">
+          <span>Username</span>
+          <input
+            type="text"
+            value={value}
+            onChange={(event) => {
+              setValue(event.target.value);
+              setMessage("");
+              setSaved(false);
+            }}
+            placeholder="e.g. TravelMuse"
+            minLength={3}
+            maxLength={20}
+            autoComplete="nickname"
+            required
+          />
+        </label>
+
+        <p style={{ color: "var(--text-muted, #777)", fontSize: 13 }}>
+          Use 3–20 letters, numbers, or underscores.
+        </p>
+
+        <div style={{ marginTop: 24 }}>
+          <strong>Need inspiration?</strong>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 8,
+              marginTop: 12,
+            }}
+          >
+            {suggestions.map((suggestion) => (
+              <button
+                type="button"
+                key={suggestion}
+                className="outline-button"
+                onClick={() => {
+                  setValue(suggestion);
+                  setMessage("");
+                  setSaved(false);
+                }}
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {message && (
+          <p
+            role="status"
+            style={{
+              marginTop: 20,
+              color: saved ? "green" : "inherit",
+            }}
+          >
+            {message}
+          </p>
+        )}
+
+        <div className="form-submit-row" style={{ marginTop: 28 }}>
+          <span>
+            <Settings2 size={15} /> Profile preferences
+          </span>
+          <button
+            type="submit"
+            className="primary-button"
+            disabled={busy}
+          >
+            {busy ? "Saving…" : "Save username"}
+            <Check size={16} />
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
